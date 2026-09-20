@@ -3,7 +3,7 @@
 ## Group members
 
 - Paresh Devlekar — GatorLink: **TODO**
-- Teammate name — GatorLink: **TODO**
+- Omkar Salkade — GatorLink: **TODO**
 
 ## Current implementation (Paresh's portion)
 
@@ -72,4 +72,3 @@ The remaining portion should add a distributed mode in which:
 4. Only the server prints discovered coins.
 5. Node naming, cookies, connection failures, and workers joining at any time
    are handled and documented.
-
