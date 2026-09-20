@@ -3,7 +3,7 @@
 
 -mode(compile).
 
--define(DEFAULT_WORK_UNIT, 10000).
+-define(DEFAULT_WORK_UNIT, 1000).
 -define(DEFAULT_GATORLINK, "paresh.devlekar").
 -define(COOKIE, cop5615_project1).
 -define(SERVER_NAME, "project1_server").
@@ -21,6 +21,7 @@ main(_) -> usage("Expected exactly one argument.").
 start_server(Difficulty) ->
     Gatorlink = gatorlink(),
     {ok, _} = application:ensure_all_started(crypto),
+    silence_runtime_reports(),
     LocalIp = local_ipv4(),
     start_distribution(?SERVER_NAME, LocalIp),
     WorkUnit = positive_env("PROJECT1_WORK_UNIT", ?DEFAULT_WORK_UNIT),
@@ -43,16 +44,26 @@ start_server(Difficulty) ->
 
 start_remote_worker(ServerHost) ->
     {ok, _} = application:ensure_all_started(crypto),
+    silence_runtime_reports(),
     LocalIp = local_ipv4(),
     Unique = integer_to_list(erlang:system_time(microsecond)),
     start_distribution("project1_worker_" ++ Unique, LocalIp),
-    ServerNode = list_to_atom(?SERVER_NAME ++ "@" ++ ServerHost),
     WorkerCount = positive_env("PROJECT1_WORKERS",
                                max(1, erlang:system_info(schedulers_online))),
-    io:format(standard_error,
-              "Worker ~s offering ~B worker actors to ~s.~n",
-              [atom_to_list(node()), WorkerCount, atom_to_list(ServerNode)]),
-    connect_and_work(ServerNode, WorkerCount).
+    resolve_and_work(ServerHost, WorkerCount).
+
+%% The server names itself with its IPv4 address. Resolve a supplied hostname
+%% to that same representation before constructing the distributed node name.
+resolve_and_work(ServerHost, WorkerCount) ->
+    case inet:getaddr(ServerHost, inet) of
+        {ok, Address} ->
+            ServerIp = inet:ntoa(Address),
+            ServerNode = list_to_atom(?SERVER_NAME ++ "@" ++ ServerIp),
+            connect_and_work(ServerNode, WorkerCount);
+        {error, _Reason} ->
+            timer:sleep(?RECONNECT_MS),
+            resolve_and_work(ServerHost, WorkerCount)
+    end.
 
 connect_and_work(ServerNode, WorkerCount) ->
     case net_kernel:connect_node(ServerNode) of
@@ -87,6 +98,12 @@ start_distribution(Name, Ip) ->
             io:format(standard_error, "Could not start Erlang distribution: ~p~n", [Reason]),
             halt(1)
     end.
+
+%% OTP normally writes distribution crash and supervisor reports to standard
+%% output. Keep stdout reserved for the required coin lines; explicit failures
+%% below are still written to standard error.
+silence_runtime_reports() ->
+    logger:set_primary_config(level, emergency).
 
 spawn_workers(Count, Boss) ->
     [spawn(fun() -> start_worker(Boss) end) || _ <- lists:seq(1, Count)],

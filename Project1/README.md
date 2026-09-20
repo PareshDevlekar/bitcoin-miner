@@ -66,11 +66,11 @@ chmod +x project1.escript
 ./project1.escript 10.22.13.155
 ```
 
-The remote process prints no coins. It starts one worker actor per online
-Erlang scheduler so the joining machine contributes all of its cores, connects
-to the registered boss, and then each actor repeatedly requests a work unit,
-mines it, and returns any coins. If the server is unavailable, or goes away
-later, the worker retries every two seconds. All coins are printed by the
+The remote process is intentionally silent. It starts one worker actor per
+online Erlang scheduler so the joining machine contributes all of its cores,
+connects to the registered boss, and then each actor repeatedly requests a work
+unit, mines it, and returns any coins. If the server is unavailable, or goes
+away later, the worker retries every two seconds. All coins are printed by the
 server.
 
 ## Actor model
@@ -88,17 +88,22 @@ given the same range.
 
 ## Work-unit size
 
-The selected work unit is **10,000 candidate strings**. We compared 1,000,
-10,000, and 50,000 candidates per assignment by mining 100 coins at difficulty
-4 with 10 local worker actors. The measured real times were 0.99 s, 0.96 s, and
-0.97 s respectively. A unit of 10,000 was the fastest in this test while still
-allowing work to be redistributed frequently when machines join.
+The selected work unit is **1,000 candidate strings**. We compared 1,000,
+10,000, and 50,000 candidates per assignment by mining 500 coins at difficulty
+4 with 10 local worker actors. Each size was run three times to reduce the
+effect of startup cost and run-to-run noise. The 1,000-candidate unit had the
+lowest median real time. It also redistributes work most quickly when machines
+with different speeds join or leave.
 
-| Candidates per work unit | Real time |
-| ---: | ---: |
-| 1,000 | 0.99 s |
-| 10,000 | 0.96 s |
-| 50,000 | 0.97 s |
+| Candidates per work unit | Trial 1 | Trial 2 | Trial 3 | Median |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 4.81 s | 4.70 s | 4.67 s | **4.70 s** |
+| 10,000 | 4.80 s | 4.76 s | 4.75 s | 4.76 s |
+| 50,000 | 4.76 s | 4.66 s | 4.73 s | 4.73 s |
+
+The three medians are close, so the measurements do not support claiming a
+large throughput difference. They do show that the smaller unit's additional
+actor messages did not reduce throughput in this implementation.
 
 ## Result for input 4
 
@@ -114,31 +119,33 @@ paresh.devlekar;255977	0000d43c82e72a7875a6b9f899b85607938278b49813afeda325345d2
 
 ## Running time and parallelism
 
-The 10,000-unit input-4 run used 10 local worker actors and stopped after 100
-coins for a repeatable measurement:
+The median 1,000-unit input-4 run used 10 local worker actors and stopped after
+500 coins for a repeatable measurement:
 
 ```text
-real 0.96
-user 7.37
-sys  0.35
+real 4.70
+user 36.52
+sys  0.51
 ```
 
-The CPU-to-real-time ratio was `(7.37 + 0.35) / 0.96 = 8.04`, showing that
-roughly eight CPU cores were used effectively during the run.
+The CPU-to-real-time ratio was `(36.52 + 0.51) / 4.70 = 7.88`, showing that
+nearly eight CPU cores were used effectively during the input-4 run. A separate
+longer difficulty-6 run measured `real 6.88`, `user 61.74`, and `sys 1.99`, for
+a ratio of `9.26` on the 10-core machine.
 
 For repeatable measurements, `PROJECT1_MAX_COINS` can stop the server after a
 specified number of coins. This option is not needed for normal submission use:
 
 ```sh
-/usr/bin/time -p env PROJECT1_MAX_COINS=100 ./project1.escript 4
+/usr/bin/time -p env PROJECT1_MAX_COINS=500 ./project1.escript 4
 ```
 
 ## Coin with the most leading zeroes
 
-The best coin found during the recorded runs had five leading zeroes:
+The best coin found during the recorded runs had six leading zeroes:
 
 ```text
-paresh.devlekar;218955	00000dfd7b4e738b4094c05bb9fe3d412cbc0c9ca22cc80013dacf8e2c01db8f
+paresh.devlekar;52171206	00000038ffd9309658fcc09369c279630d110b446e959903ec6b61f882019b95
 ```
 
 ## Largest distributed run
