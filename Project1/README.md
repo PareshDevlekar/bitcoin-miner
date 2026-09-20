@@ -39,14 +39,18 @@ No third-party Erlang libraries are required.
 
 ## Run the server
 
-The numeric argument is the required number of leading hexadecimal zeroes.
+The only argument is the required number of leading hexadecimal zeroes.
 The server also starts one local worker actor per online Erlang scheduler.
 
 ```sh
 cd Project1
 chmod +x project1.escript
-GATORLINK=paresh.devlekar ./project1.escript 4
+./project1.escript 4
 ```
+
+The gatorlink prefix `paresh.devlekar` is built into the program. It can be
+overridden with the optional `GATORLINK` environment variable, which is not
+needed for normal use.
 
 The server prints its IPv4 address at startup. It mines continuously until
 stopped with `Ctrl-C`.
@@ -54,7 +58,7 @@ stopped with `Ctrl-C`.
 ## Run a remote worker
 
 Copy the `Project1` directory to another machine with Erlang installed, then
-pass the server's displayed IPv4 address:
+pass the server's displayed IPv4 address or its hostname:
 
 ```sh
 cd Project1
@@ -62,10 +66,12 @@ chmod +x project1.escript
 ./project1.escript 10.22.13.155
 ```
 
-The remote process is intentionally silent. It connects to the registered boss,
-requests a work unit, mines it, returns any coins, and requests another unit.
-If the server is unavailable, it retries every two seconds. All coins are
-printed by the server.
+The remote process prints no coins. It starts one worker actor per online
+Erlang scheduler so the joining machine contributes all of its cores, connects
+to the registered boss, and then each actor repeatedly requests a work unit,
+mines it, and returns any coins. If the server is unavailable, or goes away
+later, the worker retries every two seconds. All coins are printed by the
+server.
 
 ## Actor model
 
@@ -96,8 +102,7 @@ allowing work to be redistributed frequently when machines join.
 
 ## Result for input 4
 
-The following coins were produced with `GATORLINK=paresh.devlekar` and input
-`4`:
+The following coins were produced by `./project1.escript 4`:
 
 ```text
 paresh.devlekar;59548	0000acb76625374ba307f9cafbac9d75e3d93293550e5f8c6b81eb6eea1220ad
@@ -125,7 +130,7 @@ For repeatable measurements, `PROJECT1_MAX_COINS` can stop the server after a
 specified number of coins. This option is not needed for normal submission use:
 
 ```sh
-/usr/bin/time -p env PROJECT1_MAX_COINS=100 GATORLINK=paresh.devlekar ./project1.escript 4
+/usr/bin/time -p env PROJECT1_MAX_COINS=100 ./project1.escript 4
 ```
 
 ## Coin with the most leading zeroes

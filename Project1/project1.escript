@@ -4,6 +4,7 @@
 -mode(compile).
 
 -define(DEFAULT_WORK_UNIT, 10000).
+-define(DEFAULT_GATORLINK, "paresh.devlekar").
 -define(COOKIE, cop5615_project1).
 -define(SERVER_NAME, "project1_server").
 -define(RECONNECT_MS, 2000).
@@ -13,12 +14,12 @@ main([Argument]) ->
     case classify_argument(Argument) of
         {server, Difficulty} -> start_server(Difficulty);
         {worker, ServerIp} -> start_remote_worker(ServerIp);
-        error -> usage("Argument must be a difficulty from 0 to 64 or an IPv4 address.")
+        error -> usage("Argument must be a difficulty from 0 to 64, or a server address.")
     end;
 main(_) -> usage("Expected exactly one argument.").
 
 start_server(Difficulty) ->
-    Gatorlink = required_gatorlink(),
+    Gatorlink = gatorlink(),
     {ok, _} = application:ensure_all_started(crypto),
     LocalIp = local_ipv4(),
     start_distribution(?SERVER_NAME, LocalIp),
@@ -40,22 +41,40 @@ start_server(Difficulty) ->
               [atom_to_list(node()), WorkerCount, WorkUnit, LocalIp]),
     monitor_boss(Boss).
 
-start_remote_worker(ServerIp) ->
+start_remote_worker(ServerHost) ->
     {ok, _} = application:ensure_all_started(crypto),
     LocalIp = local_ipv4(),
     Unique = integer_to_list(erlang:system_time(microsecond)),
     start_distribution("project1_worker_" ++ Unique, LocalIp),
-    ServerNode = list_to_atom(?SERVER_NAME ++ "@" ++ ServerIp),
-    connect_and_work(ServerNode).
+    ServerNode = list_to_atom(?SERVER_NAME ++ "@" ++ ServerHost),
+    WorkerCount = positive_env("PROJECT1_WORKERS",
+                               max(1, erlang:system_info(schedulers_online))),
+    io:format(standard_error,
+              "Worker ~s offering ~B worker actors to ~s.~n",
+              [atom_to_list(node()), WorkerCount, atom_to_list(ServerNode)]),
+    connect_and_work(ServerNode, WorkerCount).
 
-connect_and_work(ServerNode) ->
+connect_and_work(ServerNode, WorkerCount) ->
     case net_kernel:connect_node(ServerNode) of
         true ->
-            worker_loop({project1_boss, ServerNode}),
-            connect_and_work(ServerNode);
+            run_workers(WorkerCount, {project1_boss, ServerNode}),
+            connect_and_work(ServerNode, WorkerCount);
         false ->
             timer:sleep(?RECONNECT_MS),
-            connect_and_work(ServerNode)
+            connect_and_work(ServerNode, WorkerCount)
+    end.
+
+%% Runs one worker actor per scheduler and blocks until they have all stopped,
+%% which happens when the server node goes away.
+run_workers(Count, Boss) ->
+    Refs = [Ref || {_Pid, Ref} <- [spawn_monitor(fun() -> start_worker(Boss) end)
+                                   || _ <- lists:seq(1, Count)]],
+    await_workers(Refs).
+
+await_workers([]) -> ok;
+await_workers(Refs) ->
+    receive
+        {'DOWN', Ref, process, _Pid, _Reason} -> await_workers(lists:delete(Ref, Refs))
     end.
 
 start_distribution(Name, Ip) ->
@@ -70,7 +89,7 @@ start_distribution(Name, Ip) ->
     end.
 
 spawn_workers(Count, Boss) ->
-    [spawn(fun() -> worker_loop(Boss) end) || _ <- lists:seq(1, Count)],
+    [spawn(fun() -> start_worker(Boss) end) || _ <- lists:seq(1, Count)],
     ok.
 
 monitor_boss(Boss) ->
@@ -101,8 +120,11 @@ maybe_continue(State = #{max_coins := infinity}) -> boss_loop(State);
 maybe_continue(#{coin_count := Count, max_coins := Max}) when Count >= Max -> ok;
 maybe_continue(State) -> boss_loop(State).
 
-worker_loop(Boss) ->
+start_worker(Boss) ->
     monitor_node_if_remote(Boss),
+    worker_loop(Boss).
+
+worker_loop(Boss) ->
     Boss ! {request_work, self()},
     receive
         {work, Difficulty, Gatorlink, Start, Count} ->
@@ -143,11 +165,29 @@ classify_argument(Text) ->
     case parse_difficulty(Text) of
         {ok, Difficulty} -> {server, Difficulty};
         error ->
-            case inet:parse_ipv4_address(Text) of
-                {ok, _Address} -> {worker, Text};
-                {error, einval} -> error
+            case is_host(Text) of
+                true -> {worker, Text};
+                false -> error
             end
     end.
+
+%% Accepts an IPv4 literal or a DNS name. The check is purely syntactic so it
+%% works offline; an unreachable host is handled by the worker's retry loop.
+is_host(Text) ->
+    case inet:parse_ipv4_address(Text) of
+        {ok, _Address} -> true;
+        {error, einval} -> is_hostname(Text)
+    end.
+
+is_hostname("") -> false;
+is_hostname(Text) ->
+    lists:all(fun(C) ->
+                  (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) orelse
+                  (C >= $0 andalso C =< $9) orelse C =:= $. orelse C =:= $-
+              end, Text)
+        andalso lists:any(fun(C) ->
+                              (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z)
+                          end, Text).
 
 parse_difficulty(Text) ->
     try list_to_integer(Text) of
@@ -156,10 +196,10 @@ parse_difficulty(Text) ->
     catch error:badarg -> error
     end.
 
-required_gatorlink() ->
+gatorlink() ->
     case os:getenv("GATORLINK") of
-        false -> usage("Set GATORLINK to one group member's UF username first.");
-        "" -> usage("GATORLINK cannot be empty.");
+        false -> ?DEFAULT_GATORLINK;
+        "" -> ?DEFAULT_GATORLINK;
         Value -> Value
     end.
 
@@ -203,13 +243,16 @@ self_test() ->
     Expected = sha256_hex("COP5615 is a boring class"),
     {server, 4} = classify_argument("4"),
     {worker, "10.22.13.155"} = classify_argument("10.22.13.155"),
-    error = classify_argument("not-an-address"),
+    {worker, "lin114-00.cise.ufl.edu"} = classify_argument("lin114-00.cise.ufl.edu"),
+    error = classify_argument("10.22.13.155:4369"),
+    error = classify_argument("-1"),
+    true = gatorlink() =/= "" andalso is_list(gatorlink()),
     true = has_leading_zeroes(<<0, 16#0F, 1:240>>, 3),
     false = has_leading_zeroes(<<0, 16#10, 1:240>>, 3),
     io:format("All self-tests passed.~n").
 
 usage(Message) ->
     io:format(standard_error,
-              "~s~nServer: GATORLINK=your_id ./project1.escript <leading-zeroes>~n"
-              "Worker: ./project1.escript <server-ipv4-address>~n", [Message]),
+              "~s~nServer: ./project1.escript <leading-zeroes>~n"
+              "Worker: ./project1.escript <server-address>~n", [Message]),
     halt(2).
