@@ -150,11 +150,12 @@ paresh.devlekar;52171206	00000038ffd9309658fcc09369c279630d110b446e959903ec6b61f
 
 ## Largest distributed run
 
-The distributed path was verified end-to-end with two Erlang nodes (one server
-and one silent worker) on one physical laptop. The server was configured with
-zero local workers for this test, proving that the returned coin was mined by
-the remote node and printed only by the server. The largest number of physical
-machines tested was **1**.
+The distributed implementation was tested successfully on **2 physical
+laptops** connected to the same network: one laptop ran the server and the
+other ran the silent remote worker. The server was configured with zero local
+workers and stopped after receiving five coins. This confirmed that the coins
+were mined by worker actors on the remote laptop and printed only by the server.
+The largest number of physical machines tested was **2**.
 
 ## Testing and packaging
 
